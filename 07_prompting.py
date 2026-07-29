@@ -255,7 +255,7 @@ def ask_gemini(prompt: str) -> str:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0,
-                "maxOutputTokens": 350,
+                "maxOutputTokens": 800,
             },
         },
         timeout=(5, 90),
