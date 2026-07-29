@@ -22,10 +22,27 @@ st.set_page_config(
 )
 
 
+def get_secret(name: str) -> str | None:
+    try:
+        value = st.secrets.get(name)
+    except Exception:
+        return None
+    return str(value).strip() if value is not None else None
+
+
 try:
-    rag.configure_ollama(
-        host=st.secrets.get("OLLAMA_HOST"),
-        model=st.secrets.get("OLLAMA_MODEL"),
+    rag.configure_generation(
+        ollama_host=get_secret("OLLAMA_HOST"),
+        ollama_model=get_secret("OLLAMA_MODEL"),
+        openrouter_api_key=get_secret("OPENROUTER_API_KEY"),
+        openrouter_model=get_secret("OPENROUTER_MODEL"),
+        openrouter_base_url=get_secret("OPENROUTER_BASE_URL"),
+        openrouter_site_url=get_secret("OPENROUTER_SITE_URL"),
+        openrouter_app_name=get_secret("OPENROUTER_APP_NAME"),
+        gemini_api_key=get_secret("GEMINI_API_KEY"),
+        gemini_model=get_secret("GEMINI_MODEL"),
+        gemini_base_url=get_secret("GEMINI_BASE_URL"),
+        generation_provider=get_secret("GENERATION_PROVIDER"),
     )
 except Exception:
     logger.warning("Streamlit secrets were unavailable or invalid; using .env/defaults.")
@@ -611,16 +628,34 @@ def inject_css() -> None:
 
 
 @st.cache_data(show_spinner=False, ttl=30)
-def check_ollama_status(host: str, model: str) -> tuple[bool, str]:
+def check_generation_status(
+    provider: str,
+    ollama_host: str,
+    ollama_model: str,
+    openrouter_has_key: bool,
+    openrouter_model: str,
+    gemini_has_key: bool,
+    gemini_model: str,
+) -> tuple[bool, str]:
+    if provider == "gemini":
+        if gemini_has_key:
+            return True, f"Gemini model configured: {gemini_model}"
+        return False, "GEMINI_API_KEY is not configured in Streamlit Secrets."
+
+    if provider == "openrouter":
+        if openrouter_has_key:
+            return True, f"OpenRouter model configured: {openrouter_model}"
+        return False, "OPENROUTER_API_KEY is not configured in Streamlit Secrets."
+
     try:
-        response = requests.get(f"{host}/api/tags", timeout=5)
+        response = requests.get(f"{ollama_host}/api/tags", timeout=5)
         response.raise_for_status()
         pulled_models = [m.get("name", "") for m in response.json().get("models", [])]
-        if not any(model in pulled_model for pulled_model in pulled_models):
-            return False, f"Ollama is running, but '{model}' is not pulled yet."
+        if not any(ollama_model in pulled_model for pulled_model in pulled_models):
+            return False, f"Ollama is running, but '{ollama_model}' is not pulled yet."
         return True, "Connected"
     except requests.exceptions.ConnectionError:
-        return False, f"Cannot reach Ollama at {host}."
+        return False, f"Cannot reach Ollama at {ollama_host}."
     except requests.exceptions.Timeout:
         return False, "Ollama status check timed out."
     except requests.exceptions.RequestException:
@@ -667,21 +702,10 @@ def render_dashboard() -> None:
     st.title(f"{BANK_ICON} AI Bank Assistant")
     st.caption("Banking knowledge dashboard for grounded customer-service and policy answers.")
 
-    is_connected, status_detail = check_ollama_status(rag.OLLAMA_HOST, rag.OLLAMA_MODEL)
-    status_label = "Connected" if is_connected else "Needs attention"
-
-    documents = import_module("01_documents").documents
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Knowledge Base Articles", f"{len(documents):,}")
-    col2.metric("Retrieval", "Hybrid Search", "BM25 + embeddings")
-    col3.metric("LLM", f"Ollama {rag.OLLAMA_MODEL}", status_label)
-    if not is_connected:
-        col3.caption(status_detail)
-
     render_sample_prompts()
 
     st.markdown(
-        '<div class="assistant-note">SecureBank AI Assistant covers '
+        '<div class="assistant-note">AI Bank Assistant covers '
         "accounts, compliance, security, and banking policy.</div>",
         unsafe_allow_html=True,
     )
