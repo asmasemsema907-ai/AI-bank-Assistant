@@ -19,7 +19,12 @@ DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct"
 # Gemini Developer API (Google AI Studio) — REST endpoint, no SDK dependency
 # needed since the project already depends on `requests` for Ollama/OpenRouter.
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+# Use Google's self-updating alias instead of a pinned version string.
+# Pinned versions (e.g. "gemini-2.5-flash") get retired by Google on their
+# own schedule and start returning 404 with no warning in this app; the
+# "-latest" alias is maintained by Google to always point at a working
+# current Flash model.
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 ARABIC_CHAR_RE = re.compile(r"[\u0600-\u06ff]")
 
 
@@ -255,7 +260,17 @@ def ask_gemini(prompt: str) -> str:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0,
-                "maxOutputTokens": 800,
+                # NOTE: current Gemini Flash/Pro models do internal "thinking"
+                # by default, and thinking tokens are deducted from this same
+                # maxOutputTokens budget. With a low budget (e.g. 800), the
+                # model can spend most of it on hidden reasoning and leave only
+                # a handful of tokens for the visible answer -- producing short,
+                # mid-sentence cutoffs. thinkingBudget=0 disables that hidden
+                # reasoning entirely, which is appropriate for this grounded,
+                # short-answer RAG use case and keeps the full budget for the
+                # actual response. We also raise the budget itself as headroom.
+                "maxOutputTokens": 1024,
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         },
         timeout=(5, 90),
@@ -265,8 +280,19 @@ def ask_gemini(prompt: str) -> str:
     candidates = payload.get("candidates") or []
     if not candidates:
         return ""
+
+    finish_reason = candidates[0].get("finishReason")
     parts = (candidates[0].get("content") or {}).get("parts") or []
-    return "".join(str(part.get("text", "")) for part in parts).strip()
+    text = "".join(str(part.get("text", "")) for part in parts).strip()
+
+    if finish_reason == "MAX_TOKENS":
+        logger.warning(
+            "Gemini response was cut off by maxOutputTokens (model=%s, chars_returned=%d). Consider raising maxOutputTokens further.",
+            GEMINI_MODEL,
+            len(text),
+        )
+
+    return text
 
 
 def ask_llm(prompt: str) -> str:
