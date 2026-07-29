@@ -14,31 +14,116 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.1"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct"
+# Gemini Developer API (Google AI Studio) — REST endpoint, no SDK dependency
+# needed since the project already depends on `requests` for Ollama/OpenRouter.
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 ARABIC_CHAR_RE = re.compile(r"[\u0600-\u06ff]")
 
 
-def _normalize_ollama_host(host: str | None) -> str:
-    host = (host or DEFAULT_OLLAMA_HOST).strip().rstrip("/")
-    parsed = urlparse(host)
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def _normalize_http_url(value: str | None, default: str) -> str:
+    url = (value or default).strip().rstrip("/")
+    parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("OLLAMA_HOST must be an http(s) URL")
-    return host
+        raise ValueError(f"{url!r} must be an http(s) URL")
+    return url
 
 
-OLLAMA_HOST = _normalize_ollama_host(os.getenv("OLLAMA_HOST", DEFAULT_OLLAMA_HOST))
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL).strip() or DEFAULT_OLLAMA_MODEL
+OLLAMA_HOST = _normalize_http_url(_env("OLLAMA_HOST", DEFAULT_OLLAMA_HOST), DEFAULT_OLLAMA_HOST)
+OLLAMA_MODEL = _env("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL) or DEFAULT_OLLAMA_MODEL
+
+OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = _env("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL) or DEFAULT_OPENROUTER_MODEL
+OPENROUTER_BASE_URL = _normalize_http_url(
+    _env("OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL),
+    DEFAULT_OPENROUTER_BASE_URL,
+)
+OPENROUTER_SITE_URL = _env("OPENROUTER_SITE_URL")
+OPENROUTER_APP_NAME = _env("OPENROUTER_APP_NAME", "AI Bank Assistant") or "AI Bank Assistant"
+
+GEMINI_API_KEY = _env("GEMINI_API_KEY")
+GEMINI_MODEL = _env("GEMINI_MODEL", DEFAULT_GEMINI_MODEL) or DEFAULT_GEMINI_MODEL
+GEMINI_BASE_URL = _normalize_http_url(
+    _env("GEMINI_BASE_URL", DEFAULT_GEMINI_BASE_URL),
+    DEFAULT_GEMINI_BASE_URL,
+)
+
+GENERATION_PROVIDER = _env("GENERATION_PROVIDER", "auto").lower() or "auto"
+
+
+def configure_generation(
+    ollama_host: str | None = None,
+    ollama_model: str | None = None,
+    openrouter_api_key: str | None = None,
+    openrouter_model: str | None = None,
+    openrouter_base_url: str | None = None,
+    openrouter_site_url: str | None = None,
+    openrouter_app_name: str | None = None,
+    gemini_api_key: str | None = None,
+    gemini_model: str | None = None,
+    gemini_base_url: str | None = None,
+    generation_provider: str | None = None,
+) -> None:
+    global OLLAMA_HOST, OLLAMA_MODEL
+    global OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL
+    global OPENROUTER_SITE_URL, OPENROUTER_APP_NAME
+    global GEMINI_API_KEY, GEMINI_MODEL, GEMINI_BASE_URL, GENERATION_PROVIDER
+
+    if ollama_host:
+        OLLAMA_HOST = _normalize_http_url(ollama_host, DEFAULT_OLLAMA_HOST)
+    if ollama_model:
+        OLLAMA_MODEL = ollama_model.strip() or DEFAULT_OLLAMA_MODEL
+    if openrouter_api_key:
+        OPENROUTER_API_KEY = openrouter_api_key.strip()
+    if openrouter_model:
+        OPENROUTER_MODEL = openrouter_model.strip() or DEFAULT_OPENROUTER_MODEL
+    if openrouter_base_url:
+        OPENROUTER_BASE_URL = _normalize_http_url(openrouter_base_url, DEFAULT_OPENROUTER_BASE_URL)
+    if openrouter_site_url:
+        OPENROUTER_SITE_URL = openrouter_site_url.strip()
+    if openrouter_app_name:
+        OPENROUTER_APP_NAME = openrouter_app_name.strip() or "AI Bank Assistant"
+    if gemini_api_key:
+        GEMINI_API_KEY = gemini_api_key.strip()
+    if gemini_model:
+        GEMINI_MODEL = gemini_model.strip() or DEFAULT_GEMINI_MODEL
+    if gemini_base_url:
+        GEMINI_BASE_URL = _normalize_http_url(gemini_base_url, DEFAULT_GEMINI_BASE_URL)
+    if generation_provider:
+        GENERATION_PROVIDER = generation_provider.strip().lower() or "auto"
 
 
 def configure_ollama(host: str | None = None, model: str | None = None) -> None:
-    global OLLAMA_HOST, OLLAMA_MODEL
-
-    if host:
-        OLLAMA_HOST = _normalize_ollama_host(host)
-    if model:
-        OLLAMA_MODEL = model.strip() or DEFAULT_OLLAMA_MODEL
+    configure_generation(ollama_host=host, ollama_model=model)
 
 
-@lru_cache(maxsize=64)
+def active_generation_backend() -> str:
+    if GENERATION_PROVIDER in {"gemini", "openrouter", "ollama"}:
+        return GENERATION_PROVIDER
+    # auto: prefer Gemini, then OpenRouter, then fall back to local Ollama.
+    if GEMINI_API_KEY:
+        return "gemini"
+    if OPENROUTER_API_KEY:
+        return "openrouter"
+    return "ollama"
+
+
+def generation_display_name() -> str:
+    backend = active_generation_backend()
+    if backend == "gemini":
+        return f"Gemini {GEMINI_MODEL}"
+    if backend == "openrouter":
+        return f"OpenRouter {OPENROUTER_MODEL}"
+    return f"Ollama {OLLAMA_MODEL}"
+
+
+@lru_cache(maxsize=1)
 def _build_context_func():
     return import_module("06_retrieve_context").build_context
 
@@ -77,7 +162,6 @@ Cite sources like [Source 1].
 Keep the answer concise and practical. Use no more than 4 short paragraphs.
 
 {language_instruction}
-```
 
 Question:
 {question}
@@ -112,17 +196,86 @@ def ask_ollama(prompt: str) -> str:
             "prompt": prompt,
             "stream": False,
             "options": {
-    "temperature": 0,
-    "num_predict": 220,
-    "num_ctx": 2048,
-    "repeat_penalty": 1.05,
-},
+                "temperature": 0,
+                "num_predict": 220,
+                "num_ctx": 2048,
+                "repeat_penalty": 1.05,
+            },
         },
         timeout=(5, 90),
     )
     response.raise_for_status()
     payload = response.json()
     return str(payload.get("response", "")).strip()
+
+
+def ask_openrouter(prompt: str) -> str:
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured")
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "X-Title": OPENROUTER_APP_NAME,
+    }
+    if OPENROUTER_SITE_URL:
+        headers["HTTP-Referer"] = OPENROUTER_SITE_URL
+
+    response = requests.post(
+        f"{OPENROUTER_BASE_URL}/chat/completions",
+        headers=headers,
+        json={
+            "model": OPENROUTER_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_tokens": 350,
+        },
+        timeout=(5, 90),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    message = choices[0].get("message") or {}
+    return str(message.get("content", "")).strip()
+
+
+def ask_gemini(prompt: str) -> str:
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    response = requests.post(
+        f"{GEMINI_BASE_URL}/models/{GEMINI_MODEL}:generateContent",
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+        },
+        json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0,
+                "maxOutputTokens": 350,
+            },
+        },
+        timeout=(5, 90),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        return ""
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    return "".join(str(part.get("text", "")) for part in parts).strip()
+
+
+def ask_llm(prompt: str) -> str:
+    backend = active_generation_backend()
+    if backend == "gemini":
+        return ask_gemini(prompt)
+    if backend == "openrouter":
+        return ask_openrouter(prompt)
+    return ask_ollama(prompt)
 
 
 def _no_context_message(language: str) -> str:
@@ -149,6 +302,8 @@ def _service_error_message(language: str) -> str:
         )
     return "The AI service is temporarily unavailable. Please try again shortly."
 
+
+@lru_cache(maxsize=64)
 def answer_question(
     question: str,
     language: str | None = None,
@@ -159,7 +314,6 @@ def answer_question(
     if not clean_question:
         return _no_context_message(answer_language), []
 
-
     context, sources = _build_context_func()(clean_question, k=3, max_sources=2)
     if not context:
         return _no_context_message(answer_language), sources
@@ -167,21 +321,21 @@ def answer_question(
     prompt = build_prompt(clean_question, context, language=answer_language)
 
     try:
-        answer = ask_ollama(prompt)
+        answer = ask_llm(prompt)
         if answer_language == "ar" and answer and not contains_arabic(answer):
-            answer = ask_ollama(build_arabic_retry_prompt(clean_question, context))
+            answer = ask_llm(build_arabic_retry_prompt(clean_question, context))
         return answer or _no_context_message(answer_language), sources
     except requests.exceptions.ConnectionError:
-        logger.warning("Cannot reach Ollama at %s", OLLAMA_HOST)
+        logger.warning("Cannot reach %s backend", active_generation_backend())
         return _service_error_message(answer_language), sources
     except requests.exceptions.Timeout:
-        logger.warning("Ollama timed out for model %s", OLLAMA_MODEL)
+        logger.warning("%s backend timed out", active_generation_backend())
         return _service_error_message(answer_language), sources
     except requests.exceptions.RequestException:
-        logger.exception("Ollama request failed")
+        logger.exception("%s backend request failed", active_generation_backend())
         return _service_error_message(answer_language), sources
     except ValueError:
-        logger.exception("Ollama returned an invalid JSON payload")
+        logger.exception("%s backend returned an invalid JSON payload", active_generation_backend())
         return _service_error_message(answer_language), sources
     except Exception:
         logger.exception("Unexpected answer generation failure")
