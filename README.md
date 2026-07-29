@@ -12,6 +12,7 @@ The app is designed for local demos, internal pilots, and as a foundation for a 
 - Local TF-IDF fallback when the transformer embedding model is not cached.
 - Persistent ChromaDB vector store under `chroma_db/`.
 - English and Arabic answer support based on the user's question language.
+- Pluggable generation backend: Google Gemini or OpenRouter for public/cloud deployments, or local Ollama for fully offline use (auto-selected, or forced via `GENERATION_PROVIDER`).
 - Ollama integration through the local `/api/generate` endpoint.
 - Streamlit dashboard with knowledge-base metrics, retrieval status, model status, sample prompts, and floating chat widget.
 - Offline-friendly preprocessing with bundled WordNet data and safe tokenizer/stopword fallbacks.
@@ -47,7 +48,7 @@ banking_knowledge_base_1000.csv
 07_prompting.py
         |
         v
-Ollama llama3.1
+Gemini / OpenRouter / Ollama (pluggable)
         |
         v
 streamlit_app.py
@@ -88,9 +89,11 @@ Generated/local folders:
 ## Requirements
 
 - Python 3.10 or later.
-- Ollama installed and running.
-- An Ollama model pulled locally, default: `llama3.1`.
 - Windows PowerShell, macOS terminal, or Linux shell.
+- One generation backend:
+  - A free Google Gemini API key (recommended for public/cloud deployment), **or**
+  - An OpenRouter API key, **or**
+  - Ollama installed and running locally with a model pulled, default: `llama3.1`.
 
 Python dependencies are listed in `requirements.txt`:
 
@@ -115,6 +118,10 @@ Create a local `.env` file from `.env.example`.
 | `OLLAMA_HOST` | `http://localhost:11434` | Base URL for the Ollama server. |
 | `OLLAMA_MODEL` | `llama3.1` | Ollama model used for generation. |
 | `ALLOW_MODEL_DOWNLOAD` | `false` | Set to `true` only when the server may download Hugging Face models during setup. |
+| `GENERATION_PROVIDER` | `auto` | `auto`, `gemini`, `openrouter`, or `ollama`. `auto` prefers Gemini, then OpenRouter, then Ollama, based on which API key is set. |
+| `GEMINI_API_KEY` | *(empty)* | Google AI Studio API key. Get one free at https://aistudio.google.com/apikey. |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model used for generation. |
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Gemini REST API base URL. |
 
 Keep `.env` and `.streamlit/secrets.toml` out of version control.
 
