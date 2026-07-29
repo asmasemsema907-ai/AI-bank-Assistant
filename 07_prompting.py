@@ -246,11 +246,8 @@ def ask_openrouter(prompt: str) -> str:
     return str(message.get("content", "")).strip()
 
 
-def ask_gemini(prompt: str) -> str:
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not configured")
-
-    response = requests.post(
+def _call_gemini(prompt: str, generation_config: dict) -> "requests.Response":
+    return requests.post(
         f"{GEMINI_BASE_URL}/models/{GEMINI_MODEL}:generateContent",
         headers={
             "Content-Type": "application/json",
@@ -258,23 +255,46 @@ def ask_gemini(prompt: str) -> str:
         },
         json={
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0,
-                # NOTE: current Gemini Flash/Pro models do internal "thinking"
-                # by default, and thinking tokens are deducted from this same
-                # maxOutputTokens budget. With a low budget (e.g. 800), the
-                # model can spend most of it on hidden reasoning and leave only
-                # a handful of tokens for the visible answer -- producing short,
-                # mid-sentence cutoffs. thinkingBudget=0 disables that hidden
-                # reasoning entirely, which is appropriate for this grounded,
-                # short-answer RAG use case and keeps the full budget for the
-                # actual response. We also raise the budget itself as headroom.
-                "maxOutputTokens": 1024,
-                "thinkingConfig": {"thinkingBudget": 0},
-            },
+            "generationConfig": generation_config,
         },
         timeout=(5, 90),
     )
+
+
+def ask_gemini(prompt: str) -> str:
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    # NOTE: current Gemini Flash/Pro "thinking" models deduct hidden reasoning
+    # tokens from the same maxOutputTokens budget as the visible answer, which
+    # can truncate short answers. thinkingBudget=0 disables that reasoning.
+    # However, not every model behind the "-latest" alias supports this field,
+    # and some reject it outright with an HTTP 400. So we try it first, and if
+    # the API rejects the field, we transparently retry without it instead of
+    # failing the whole request -- with a larger maxOutputTokens as headroom.
+    response = _call_gemini(
+        prompt,
+        {
+            "temperature": 0,
+            "maxOutputTokens": 1024,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    )
+
+    if response.status_code == 400:
+        logger.warning(
+            "Gemini rejected thinkingConfig for model=%s (400): %s -- retrying without it",
+            GEMINI_MODEL,
+            response.text[:500],
+        )
+        response = _call_gemini(
+            prompt,
+            {
+                "temperature": 0,
+                "maxOutputTokens": 2048,
+            },
+        )
+
     response.raise_for_status()
     payload = response.json()
     candidates = payload.get("candidates") or []
