@@ -443,12 +443,52 @@ def inject_css() -> None:
                 z-index: 9999;
                 width: min(400px, calc(100vw - 32px));
                 height: min(680px, calc(100vh - 112px));
+                max-height: calc(100vh - 112px);
                 overflow: hidden;
                 background: #ffffff;
                 border: 1px solid #e2e8f0;
                 border-radius: 18px;
                 box-shadow: 0 18px 54px rgba(15, 23, 42, 0.22);
                 padding: 16px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            /* Header row (title + language toggle) and the input/clear controls
+               must never shrink; only the messages list should flex/scroll.
+               Without this, a shorter viewport (different device/window size)
+               forces the fixed-height messages panel to overflow the fixed
+               chat window height, and overflow:hidden on the window clips
+               whatever comes after it - which is exactly the input box and
+               clear button. */
+            .st-key-chat_window > div {
+                display: flex;
+                flex-direction: column;
+                flex: 1 1 auto;
+                min-height: 0;
+            }
+
+            .st-key-chat_window [data-testid="stHorizontalBlock"] {
+                flex: 0 0 auto;
+            }
+
+            .st-key-chat_messages_panel {
+                flex: 1 1 auto;
+                min-height: 0;
+            }
+
+            .st-key-chat_messages_panel > div {
+                height: 100% !important;
+                max-height: 100% !important;
+                overflow-y: auto !important;
+            }
+
+            .st-key-chat_input_panel {
+                flex: 0 0 auto;
+            }
+
+            .st-key-clear_chat_btn {
+                flex: 0 0 auto;
             }
 
             .chat-header {
@@ -811,7 +851,7 @@ def render_chat_window() -> None:
         pending_query = st.session_state.pop("pending_chat_query", None)
         pending_payload = prepare_chat_query(pending_query) if pending_query else None
 
-        messages_container = st.container(height=480)
+        messages_container = st.container(height=480, key="chat_messages_panel")
         with messages_container:
             if not st.session_state.chat_history:
                 render_chat_message({"role": "assistant", "content": labels["greeting"]})
