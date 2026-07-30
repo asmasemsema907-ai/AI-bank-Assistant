@@ -454,20 +454,14 @@ def inject_css() -> None:
                 flex-direction: column;
             }
 
-            /* Header row (title + language toggle) and the input/clear controls
-               must never shrink; only the messages list should flex/scroll.
-               Without this, a shorter viewport (different device/window size)
-               forces the fixed-height messages panel to overflow the fixed
-               chat window height, and overflow:hidden on the window clips
-               whatever comes after it - which is exactly the input box and
-               clear button. */
-            .st-key-chat_window > div {
-                display: flex;
-                flex-direction: column;
-                flex: 1 1 auto;
-                min-height: 0;
-            }
-
+            /* Only the messages list should flex/scroll; the header row and
+               the input/clear controls keep their natural height. (Streamlit
+               applies the "st-key-chat_window" class directly to the vertical
+               block that holds ALL of these as direct children, so a rule
+               like ".st-key-chat_window > div { flex: 1 1 auto }" would wrongly
+               match every one of them and force them to grow equally - splitting
+               the window into equal bands instead of leaving only the messages
+               panel scrollable.) */
             .st-key-chat_window [data-testid="stHorizontalBlock"] {
                 flex: 0 0 auto;
             }
